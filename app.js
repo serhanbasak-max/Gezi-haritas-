@@ -71,7 +71,7 @@
   }
   function fillFor(code) {
     const c = state.countries.get(code);
-    if (state.mode === "cities") return visited(c) ? "#2d5a8a" : COLORS.land;
+    if (state.mode === "cities") return visited(c) ? "#14304f" : "#0d1f38";
     if (visited(c)) return `url(#flag-${code})`;
     if (c?.wish) return "#4b4f8f";
     return COLORS.land;
@@ -97,11 +97,54 @@
       : [];
     gArcs.selectAll("path").data(arcs, (d) => d.code).join("path").attr("class", "arc").attr("stroke", (d) => d.color)
       .style("filter", (d) => `drop-shadow(0 0 3px ${d.color})`);
-    const cities = state.mode === "cities" ? state.cities : [];
-    gCities.selectAll("circle").data(cities, (d) => d.id).join("circle").attr("class", "cityDot").attr("r", 4.5)
-      .attr("fill", (d) => d.home === "lives" ? COLORS.home : d.home === "lived" ? COLORS.lived : d.together || (d.serhan && d.goknur) ? COLORS.together : d.serhan ? COLORS.serhan : d.goknur ? COLORS.goknur : COLORS.wish)
-      .on("click", (ev, d) => openCountry(d.country_code));
+    renderCities();
     redraw();
+  }
+
+  // ---------- Şehirler: gece ışıkları + fotoğraf balonları ----------
+  const cityGlow = defs.append("filter").attr("id", "cityGlow").attr("x", "-200%").attr("y", "-200%").attr("width", "500%").attr("height", "500%");
+  cityGlow.append("feGaussianBlur").attr("stdDeviation", 3.5);
+  const cityColor = (d) => d.home === "lives" ? COLORS.home : d.home === "lived" ? COLORS.lived : d.wish ? COLORS.wish : "#ffd27a";
+  const whoColor = (d) => d.together || (d.serhan && d.goknur) ? COLORS.together : d.serhan ? COLORS.serhan : d.goknur ? COLORS.goknur : cityColor(d);
+  function cityPhoto(c) {
+    const n = c.name.toLocaleLowerCase("tr");
+    const trips = state.trips.filter((t) => t.country_code === c.country_code &&
+      ((t.city && t.city.toLocaleLowerCase("tr") === n) || (t.title || "").toLocaleLowerCase("tr").includes(n) || (t.note || "").toLocaleLowerCase("tr").includes(n)));
+    for (const t of trips) { const p = state.photos.find((x) => x.trip_id === t.id && !isVideo(x.path)); if (p) return p; }
+    return null;
+  }
+  function renderCities() {
+    const cities = state.mode === "cities" ? state.cities.map((c) => ({ ...c, photo: cityPhoto(c) })) : [];
+    gSphere.attr("fill", state.mode === "cities" ? "#081a33" : COLORS.sea);
+    gHome.attr("visibility", state.mode === "cities" ? "hidden" : null);
+    const g = gCities.selectAll("g.city").data(cities, (d) => d.id + (d.photo ? "p" + d.photo.id : ""))
+      .join((enter) => {
+        const e = enter.append("g").attr("class", (d) => "city" + (d.photo ? " balloon" : d.wish ? " wishc" : " light"));
+        e.each(function (d) {
+          const el = d3.select(this);
+          if (d.photo) {
+            const pid = "cp-" + d.id;
+            el.append("clipPath").attr("id", pid).append("circle").attr("cy", -38).attr("r", 18);
+            el.append("line").attr("y2", -18).attr("stroke", "#fff").attr("stroke-width", 1.5);
+            el.append("circle").attr("r", 3).attr("fill", "#fff");
+            el.append("circle").attr("cy", -38).attr("r", 21).attr("fill", whoColor(d));
+            el.append("image").attr("href", mediaUrl(d.photo)).attr("x", -18).attr("y", -56).attr("width", 36).attr("height", 36).attr("preserveAspectRatio", "xMidYMid slice").attr("clip-path", `url(#${pid})`);
+            el.append("text").attr("class", "cityName always").attr("y", -64).attr("text-anchor", "middle").text(d.name);
+          } else if (d.wish && !d.home) {
+            el.append("circle").attr("class", "pulse").attr("r", 5).attr("fill", "none").attr("stroke", COLORS.wish).attr("stroke-width", 1.5);
+            el.append("circle").attr("r", 4.5).attr("fill", "rgba(167,139,250,.25)").attr("stroke", COLORS.wish).attr("stroke-width", 1.5).attr("stroke-dasharray", "2 2");
+            el.append("text").attr("class", "cityName").attr("x", 8).attr("y", 4).text(d.name);
+          } else {
+            el.append("circle").attr("r", 8).attr("fill", cityColor(d)).attr("filter", "url(#cityGlow)").attr("class", "glow");
+            el.append("circle").attr("r", 2.6).attr("fill", "#fff");
+            el.append("text").attr("class", "cityName").attr("x", 8).attr("y", 4).text(d.name);
+          }
+          el.append("circle").attr("r", 14).attr("cy", d.photo ? -30 : 0).attr("fill", "transparent"); // dokunma alanı
+        });
+        return e;
+      })
+      .on("click", (ev, d) => openCountry(d.country_code));
+    g.sort((a, b) => (a.photo ? 1 : 0) - (b.photo ? 1 : 0));
   }
 
   function redraw() {
@@ -112,10 +155,11 @@
     gCountries.selectAll("path").attr("d", path);
     gArcs.selectAll("path").attr("d", (d) => path(arcLine(d.to)));
     const center = projection.invert([W / 2, H * 0.47]);
-    gCities.selectAll("circle").each(function (d) {
+    gCities.classed("labels", zoomK >= 2.2).selectAll("g.city").each(function (d) {
       const vis = d3.geoDistance([d.lon, d.lat], center) < 1.5;
       const [x, y] = projection([d.lon, d.lat]);
-      d3.select(this).attr("cx", x).attr("cy", y).attr("display", vis ? null : "none");
+      this.setAttribute("transform", `translate(${x},${y})`);
+      this.style.display = vis ? "" : "none";
     });
     const hv = d3.geoDistance(HOME, center) < 1.5, [hx, hy] = projection(HOME);
     gHome.attr("cx", hx).attr("cy", hy).attr("display", hv ? null : "none");
@@ -164,16 +208,19 @@
 
   // Sürükle = döndür, iki parmak / tekerlek = yakınlaştır
   function setupInteraction() {
-    let r0, p0;
+    let prev;
     const zoom = d3.zoom().scaleExtent([0.8, 8])
-      .on("start", (ev) => { stopSpin(); r0 = projection.rotate(); p0 = [ev.transform.x, ev.transform.y]; })
+      .on("start", (ev) => { stopSpin(); prev = ev.transform; })
       .on("zoom", (ev) => {
-        zoomK = ev.transform.k;
-        projection.scale(baseScale * zoomK);
-        const k = 0.25 / zoomK;
-        const dx = ev.transform.x - p0[0], dy = ev.transform.y - p0[1];
-        projection.rotate([r0[0] + dx * k, Math.max(-85, Math.min(85, r0[1] - dy * k)), r0[2]]);
-        redraw();
+        const t = ev.transform;
+        if (Math.abs(t.k - prev.k) > 1e-6) {
+          // tekerlek / iki parmak: yalnızca yakınlaştır, döndürme
+          zoomK = t.k; projection.scale(baseScale * zoomK);
+        } else {
+          const k = 0.25 / zoomK, r = projection.rotate();
+          projection.rotate([r[0] + (t.x - prev.x) * k, Math.max(-85, Math.min(85, r[1] - (t.y - prev.y) * k)), r[2]]);
+        }
+        prev = t; redraw();
       })
       .on("end", () => { lastInteract = Date.now(); });
     svg.call(zoom).on("dblclick.zoom", null);
