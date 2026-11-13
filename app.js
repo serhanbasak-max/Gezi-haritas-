@@ -116,30 +116,37 @@
       : [];
     gBadges.selectAll("g.badge").data(list, (d) => d.code + d.kind).join((en) => {
       const g = en.append("g").attr("class", "badge").on("click", (ev, d) => openCountry(d.code));
-      g.append("circle").attr("class", "bdot").attr("r", 4.5).attr("fill", (d) => BADGE_COLOR[d.kind]).attr("stroke", "#fff").attr("stroke-width", 1.5);
-      g.append("image").attr("href", (d) => `avatars/${d.kind}.svg?v=7`);
-      g.append("circle").attr("class", "bhit").attr("fill", "transparent");
+      appendBadge(g);
       return g;
     }).order();
   }
-  // Rozetleri yerleştir: büyük ülke önce; çakışan rozet küçük renkli noktaya döner, yaklaştırınca açılır
-  function layoutBadges(center) {
-    const bs = Math.min(16 + zoomK * 8, 46), gap = bs * 0.92, placed = [];
+  // Rozetleri yerleştir: öncelikli olan önce; çakışan rozet küçük renkli noktaya döner, yaklaştırınca açılır
+  const badgeSize = () => Math.min(16 + zoomK * 8, 46);
+  function layoutBadges(sel, center, posOf, placeOrder, prio) {
+    const bs = badgeSize(), gap = bs * 0.92, placed = [];
     let reorder = false;
-    gBadges.selectAll("g.badge").each(function (d) {
-      const vis = d3.geoDistance(d.at, center) < 1.45;
+    sel.nodes().sort((a, b) => placeOrder(a.__data__, b.__data__)).forEach(function (el) { (function (d) {
+      const p = posOf(d), vis = d3.geoDistance(p, center) < 1.45;
       this.style.display = vis ? "" : "none";
       if (!vis) return;
-      const [x, y] = projection(d.at);
+      const [x, y] = projection(p);
       const full = !placed.some(([px, py]) => Math.hypot(px - x, py - y) < gap);
-      if (full) placed.push([x, y]);
+      if (full) { placed.push([x, y]); if (d.photo) placed.push([x, y - bs / 2 - 36], [x, y - bs / 2 - 18], [x, y - bs / 2 - 62]); } // balon da yer kaplar
       this.setAttribute("transform", `translate(${x},${y})`);
       if (this.classList.contains("mini") === full) { this.classList.toggle("mini", !full); d.full = full; reorder = true; }
-      const img = this.querySelector("image");
+      const img = this.querySelector("image.av");
       img.setAttribute("x", -bs / 2); img.setAttribute("y", -bs / 2); img.setAttribute("width", bs); img.setAttribute("height", bs);
       this.querySelector(".bhit").setAttribute("r", full ? bs / 2 : 10);
-    });
-    if (reorder) gBadges.selectAll("g.badge").sort((a, b) => (a.full ? 1 : 0) - (b.full ? 1 : 0) || b.area - a.area); // tam rozetler üstte
+      const bal = this.querySelector(".bal"); if (bal) bal.setAttribute("transform", `translate(0,${-bs / 2 + 2})`);
+      const nm = this.querySelector(".cityName"); if (nm) nm.setAttribute("y", bal ? -bs / 2 - 64 + 2 : bs / 2 + 13);
+    }).call(el, el.__data__); });
+    if (reorder) sel.sort((a, b) => (a.full ? 1 : 0) - (b.full ? 1 : 0) || prio(a, b)); // tam rozetler üstte
+    return placed;
+  }
+  function appendBadge(g) {
+    g.append("circle").attr("class", "bdot").attr("r", 4.5).attr("fill", (d) => BADGE_COLOR[d.kind]).attr("stroke", "#fff").attr("stroke-width", 1.5);
+    g.append("image").attr("class", "av").attr("href", (d) => `avatars/${d.kind}.svg?v=8`);
+    g.append("circle").attr("class", "bhit").attr("fill", "transparent");
   }
 
   // ---------- Şehirler: gece ışıkları + fotoğraf balonları ----------
@@ -156,26 +163,30 @@
   }
   function renderCities() {
     const nightMode = state.mode === "cities";
-    const cities = state.cities.map((c) => ({ ...c, photo: nightMode ? cityPhoto(c) : null, mini: !nightMode }));
+    const cities = state.cities.map((c) => ({ ...c, photo: nightMode ? cityPhoto(c) : null, mini: !nightMode, kind: nightMode ? badgeKind(c) : null }));
     gCities.classed("mini", !nightMode);
     gSphere.attr("fill", state.mode === "cities" ? "#081a33" : COLORS.sea);
     gHome.attr("visibility", state.mode === "cities" ? "hidden" : null);
-    const g = gCities.selectAll("g.city").data(cities, (d) => d.id + (d.photo ? "p" + d.photo.id : "") + (d.mini ? "m" : ""))
+    const g = gCities.selectAll("g.city").data(cities, (d) => d.id + (d.photo ? "p" + d.photo.id : "") + (d.mini ? "m" : "") + (d.kind || ""))
       .join((enter) => {
-        const e = enter.append("g").attr("class", (d) => "city" + (d.photo ? " balloon" : d.wish ? " wishc" : " light"));
+        const e = enter.append("g").attr("class", (d) => "city" + (d.kind ? " badge pbadge" : d.wish ? " wishc" : " light"));
         e.each(function (d) {
           const el = d3.select(this);
           if (d.mini) {
             el.append("circle").attr("r", 3).attr("fill", "#fff").attr("stroke", whoColor(d)).attr("stroke-width", 1.5);
             el.append("text").attr("class", "cityName").attr("x", 6).attr("y", 4).text(d.name);
-          } else if (d.photo) {
-            const pid = "cp-" + d.id;
-            el.append("clipPath").attr("id", pid).append("circle").attr("cy", -38).attr("r", 18);
-            el.append("line").attr("y2", -18).attr("stroke", "#fff").attr("stroke-width", 1.5);
-            el.append("circle").attr("r", 3).attr("fill", "#fff");
-            el.append("circle").attr("cy", -38).attr("r", 21).attr("fill", whoColor(d));
-            el.append("image").attr("href", mediaUrl(d.photo)).attr("x", -18).attr("y", -56).attr("width", 36).attr("height", 36).attr("preserveAspectRatio", "xMidYMid slice").attr("clip-path", `url(#${pid})`);
-            el.append("text").attr("class", "cityName always").attr("y", -64).attr("text-anchor", "middle").text(d.name);
+          } else if (d.kind) {
+            // portre rozeti; fotoğrafı varsa üstünde fotoğraf balonu
+            if (d.photo) {
+              const pid = "cp-" + d.id, b = el.append("g").attr("class", "bal balloon");
+              b.append("clipPath").attr("id", pid).append("circle").attr("cy", -38).attr("r", 18);
+              b.append("line").attr("y1", 0).attr("y2", -17).attr("stroke", "#fff").attr("stroke-width", 1.5);
+              b.append("circle").attr("cy", -38).attr("r", 21).attr("fill", whoColor(d));
+              b.append("image").attr("href", mediaUrl(d.photo)).attr("x", -18).attr("y", -56).attr("width", 36).attr("height", 36).attr("preserveAspectRatio", "xMidYMid slice").attr("clip-path", `url(#${pid})`);
+            }
+            appendBadge(el);
+            el.append("text").attr("class", "cityName" + (d.photo ? " always" : "")).attr("text-anchor", "middle").text(d.name);
+            return;
           } else if (d.wish && !d.home) {
             el.append("circle").attr("class", "pulse").attr("r", 5).attr("fill", "none").attr("stroke", COLORS.wish).attr("stroke-width", 1.5);
             el.append("circle").attr("r", 4.5).attr("fill", "rgba(167,139,250,.25)").attr("stroke", COLORS.wish).attr("stroke-width", 1.5).attr("stroke-dasharray", "2 2");
@@ -190,8 +201,12 @@
         return e;
       })
       .on("click", (ev, d) => openCountry(d.country_code));
-    g.sort((a, b) => (a.photo ? 1 : 0) - (b.photo ? 1 : 0));
+    g.sort(cityDraw);
   }
+  // öncelik: fotoğraflı > ev > birlikte > diğerleri
+  const cityRank = (d) => (d.photo ? 8 : 0) + (d.home ? 4 : 0) + (d.together ? 2 : 0) + (d.kind ? 1 : 0);
+  const cityPrio = (a, b) => cityRank(b) - cityRank(a);
+  const cityDraw = (a, b) => cityRank(a) - cityRank(b); // önemli olan en üstte çizilir
 
   function redraw() {
     gSphere.attr("d", path({ type: "Sphere" }));
@@ -201,13 +216,14 @@
     gCountries.selectAll("path").attr("d", path);
     gArcs.selectAll("path").attr("d", (d) => path(arcLine(d.to)));
     const center = projection.invert([W / 2, H * 0.47]);
-    gCities.classed("labels", zoomK >= (state.mode === "cities" ? 2.2 : 3.2)).classed("hide", state.mode !== "cities" && zoomK < 2.4).selectAll("g.city").each(function (d) {
+    gCities.classed("labels", zoomK >= (state.mode === "cities" ? 2.2 : 3.2)).classed("hide", state.mode !== "cities" && zoomK < 2.4).classed("wishNames", zoomK >= 3.6).selectAll("g.city:not(.pbadge)").each(function (d) {
       const vis = d3.geoDistance([d.lon, d.lat], center) < 1.5;
       const [x, y] = projection([d.lon, d.lat]);
       this.setAttribute("transform", `translate(${x},${y})`);
       this.style.display = vis ? "" : "none";
     });
-    layoutBadges(center);
+    layoutBadges(gBadges.selectAll("g.badge"), center, (d) => d.at, (a, b) => b.area - a.area, (a, b) => b.area - a.area);
+    layoutBadges(gCities.selectAll("g.pbadge"), center, (d) => [d.lon, d.lat], cityPrio, cityDraw);
     const hv = d3.geoDistance(HOME, center) < 1.5, [hx, hy] = projection(HOME);
     gHome.attr("cx", hx).attr("cy", hy).attr("display", hv ? null : "none");
   }
