@@ -44,6 +44,7 @@
   const gCountries = svg.append("g");
   const gArcs = svg.append("g");
   const gCities = svg.append("g");
+  const gBadges = svg.append("g").attr("class", "badges");
   const gHome = svg.append("circle").attr("class", "homeDot").attr("r", 6);
   const projection = d3.geoOrthographic().clipAngle(90).precision(0.6);
   const path = d3.geoPath(projection);
@@ -98,7 +99,47 @@
     gArcs.selectAll("path").data(arcs, (d) => d.code).join("path").attr("class", "arc").attr("stroke", (d) => d.color)
       .style("filter", (d) => `drop-shadow(0 0 3px ${d.color})`);
     renderCities();
+    renderBadges();
     redraw();
+  }
+
+  // ---------- Sero & Gorki portre rozetleri ----------
+  const badgeKind = (c) => c.together ? "birlikte" : c.serhan && c.goknur ? "ikimiz-ayri" : c.serhan ? "sero" : c.goknur ? "gorki" : null;
+  const BADGE_COLOR = { sero: COLORS.serhan, gorki: COLORS.goknur, "ikimiz-ayri": "url(#bothStroke)", birlikte: COLORS.together };
+  const areaCache = new Map();
+  const areaOf = (code) => { if (!areaCache.has(code)) { const f = state.byCode.get(code); areaCache.set(code, f ? d3.geoArea(mainland(f)) : 0); } return areaCache.get(code); };
+  function renderBadges() {
+    const list = state.mode === "countries"
+      ? [...state.countries.values()].filter((c) => !c.home && badgeKind(c) && state.byCode.get(c.code))
+          .map((c) => ({ code: c.code, kind: badgeKind(c), at: centroidOf(c.code), area: areaOf(c.code) }))
+          .sort((a, b) => b.area - a.area)
+      : [];
+    gBadges.selectAll("g.badge").data(list, (d) => d.code + d.kind).join((en) => {
+      const g = en.append("g").attr("class", "badge").on("click", (ev, d) => openCountry(d.code));
+      g.append("circle").attr("class", "bdot").attr("r", 4.5).attr("fill", (d) => BADGE_COLOR[d.kind]).attr("stroke", "#fff").attr("stroke-width", 1.5);
+      g.append("image").attr("href", (d) => `avatars/${d.kind}.svg?v=7`);
+      g.append("circle").attr("class", "bhit").attr("fill", "transparent");
+      return g;
+    }).order();
+  }
+  // Rozetleri yerleştir: büyük ülke önce; çakışan rozet küçük renkli noktaya döner, yaklaştırınca açılır
+  function layoutBadges(center) {
+    const bs = Math.min(16 + zoomK * 8, 46), gap = bs * 0.92, placed = [];
+    let reorder = false;
+    gBadges.selectAll("g.badge").each(function (d) {
+      const vis = d3.geoDistance(d.at, center) < 1.45;
+      this.style.display = vis ? "" : "none";
+      if (!vis) return;
+      const [x, y] = projection(d.at);
+      const full = !placed.some(([px, py]) => Math.hypot(px - x, py - y) < gap);
+      if (full) placed.push([x, y]);
+      this.setAttribute("transform", `translate(${x},${y})`);
+      if (this.classList.contains("mini") === full) { this.classList.toggle("mini", !full); d.full = full; reorder = true; }
+      const img = this.querySelector("image");
+      img.setAttribute("x", -bs / 2); img.setAttribute("y", -bs / 2); img.setAttribute("width", bs); img.setAttribute("height", bs);
+      this.querySelector(".bhit").setAttribute("r", full ? bs / 2 : 10);
+    });
+    if (reorder) gBadges.selectAll("g.badge").sort((a, b) => (a.full ? 1 : 0) - (b.full ? 1 : 0) || b.area - a.area); // tam rozetler üstte
   }
 
   // ---------- Şehirler: gece ışıkları + fotoğraf balonları ----------
@@ -114,15 +155,20 @@
     return null;
   }
   function renderCities() {
-    const cities = state.mode === "cities" ? state.cities.map((c) => ({ ...c, photo: cityPhoto(c) })) : [];
+    const nightMode = state.mode === "cities";
+    const cities = state.cities.map((c) => ({ ...c, photo: nightMode ? cityPhoto(c) : null, mini: !nightMode }));
+    gCities.classed("mini", !nightMode);
     gSphere.attr("fill", state.mode === "cities" ? "#081a33" : COLORS.sea);
     gHome.attr("visibility", state.mode === "cities" ? "hidden" : null);
-    const g = gCities.selectAll("g.city").data(cities, (d) => d.id + (d.photo ? "p" + d.photo.id : ""))
+    const g = gCities.selectAll("g.city").data(cities, (d) => d.id + (d.photo ? "p" + d.photo.id : "") + (d.mini ? "m" : ""))
       .join((enter) => {
         const e = enter.append("g").attr("class", (d) => "city" + (d.photo ? " balloon" : d.wish ? " wishc" : " light"));
         e.each(function (d) {
           const el = d3.select(this);
-          if (d.photo) {
+          if (d.mini) {
+            el.append("circle").attr("r", 3).attr("fill", "#fff").attr("stroke", whoColor(d)).attr("stroke-width", 1.5);
+            el.append("text").attr("class", "cityName").attr("x", 6).attr("y", 4).text(d.name);
+          } else if (d.photo) {
             const pid = "cp-" + d.id;
             el.append("clipPath").attr("id", pid).append("circle").attr("cy", -38).attr("r", 18);
             el.append("line").attr("y2", -18).attr("stroke", "#fff").attr("stroke-width", 1.5);
@@ -155,12 +201,13 @@
     gCountries.selectAll("path").attr("d", path);
     gArcs.selectAll("path").attr("d", (d) => path(arcLine(d.to)));
     const center = projection.invert([W / 2, H * 0.47]);
-    gCities.classed("labels", zoomK >= 2.2).selectAll("g.city").each(function (d) {
+    gCities.classed("labels", zoomK >= (state.mode === "cities" ? 2.2 : 3.2)).classed("hide", state.mode !== "cities" && zoomK < 2.4).selectAll("g.city").each(function (d) {
       const vis = d3.geoDistance([d.lon, d.lat], center) < 1.5;
       const [x, y] = projection([d.lon, d.lat]);
       this.setAttribute("transform", `translate(${x},${y})`);
       this.style.display = vis ? "" : "none";
     });
+    layoutBadges(center);
     const hv = d3.geoDistance(HOME, center) < 1.5, [hx, hy] = projection(HOME);
     gHome.attr("cx", hx).attr("cy", hy).attr("display", hv ? null : "none");
   }
