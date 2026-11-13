@@ -11,7 +11,7 @@
 <link rel="icon" href="icon.svg" type="image/svg+xml">
 <link rel="apple-touch-icon" href="icon-192.png">
 <title>Gezi Haritası</title>
-<link rel="stylesheet" href="style.css?v=8">
+<link rel="stylesheet" href="style.css?v=10">
 </head>
 <body>
 <canvas id="stars"></canvas>
@@ -65,19 +65,30 @@
   </div>
 </section>
 
+<button id="addBtn" class="fab" aria-label="Ülke ya da şehir ekle" hidden>+</button>
+
+<!-- Ekle paneli -->
+<div id="addSheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-head"><h2 id="aTitle">Ekle</h2><button class="iconbtn close" id="addClose" aria-label="Kapat">✕</button></div>
+  <div class="tabs" id="aTabs"><button data-tab="country" class="on">Ülke</button><button data-tab="city">Şehir</button></div>
+  <div class="qwrap"><input id="aQuery" type="search" placeholder="Ülke adı" autocomplete="off" list="countrylist" enterkeyhint="search"></div>
+  <div id="aSug" class="sug" hidden></div>
+  <p id="aPicked" class="picked" hidden></p>
+  <h3>Kim gitti?</h3>
+  <div id="aPick" class="picker"><div class="who"></div><div class="stat"></div></div>
+  <button id="aSave" class="primary big">Kaydet</button>
+</div>
+
 <!-- Düzenleme paneli -->
 <div id="sheet" class="sheet" hidden>
   <div class="sheet-handle"></div>
   <div class="sheet-head"><h2 id="cName"></h2><button class="iconbtn close" id="sheetClose" aria-label="Kapat">✕</button></div>
-  <div id="cEdit" class="edit-status">
-    <label><input type="checkbox" data-f="serhan"> Sero gitti</label>
-    <label><input type="checkbox" data-f="goknur"> Gorki gitti</label>
-    <label><input type="checkbox" data-f="together"> Birlikte gittik</label>
-    <label><input type="checkbox" data-f="wish"> Gitmek istiyoruz</label>
-    <label class="sel">Ev:
-      <select data-f="home"><option value="">—</option><option value="lives">Yaşıyoruz</option><option value="lived">Yaşadık</option></select>
-    </label>
-  </div>
+  <h3>Kim gitti?</h3>
+  <div id="cPick" class="picker"><div class="who"></div><div class="stat"></div></div>
+  <h3>Şehirler</h3>
+  <div id="cCities"></div>
+  <button id="addCityHere" class="small wide">+ Bu ülkeye şehir ekle</button>
   <h3>Geziler</h3>
   <div id="cTrips"></div>
   <button id="addTripBtn" class="primary">+ Gezi ekle</button>
@@ -110,7 +121,7 @@
 <script src="vendor/d3.min.js"></script>
 <script src="vendor/topojson-client.min.js"></script>
 <script src="vendor/supabase.js"></script>
-<script src="config.js?v=8"></script>
-<script src="app.js?v=8"></script>
+<script src="config.js?v=10"></script>
+<script src="app.js?v=10"></script>
 </body>
 </html>

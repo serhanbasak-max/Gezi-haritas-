@@ -121,7 +121,7 @@
     }).order();
   }
   // Rozetleri yerleştir: öncelikli olan önce; çakışan rozet küçük renkli noktaya döner, yaklaştırınca açılır
-  const badgeSize = () => Math.min(16 + zoomK * 8, 46);
+  const badgeSize = () => Math.min(18 + 11 * Math.log2(zoomK + 1), 66);
   function layoutBadges(sel, center, posOf, placeOrder, prio) {
     const bs = badgeSize(), gap = bs * 0.92, placed = [];
     let reorder = false;
@@ -132,7 +132,7 @@
       const [x, y] = projection(p);
       const full = !placed.some(([px, py]) => Math.hypot(px - x, py - y) < gap);
       if (full) { placed.push([x, y]); if (d.photo) placed.push([x, y - bs / 2 - 36], [x, y - bs / 2 - 18], [x, y - bs / 2 - 62]); } // balon da yer kaplar
-      this.setAttribute("transform", `translate(${x},${y})`);
+      this.setAttribute("transform", `translate(${x},${y})`); d._x = x; d._y = y; d._bs = full ? bs : 0;
       if (this.classList.contains("mini") === full) { this.classList.toggle("mini", !full); d.full = full; reorder = true; }
       const img = this.querySelector("image.av");
       img.setAttribute("x", -bs / 2); img.setAttribute("y", -bs / 2); img.setAttribute("width", bs); img.setAttribute("height", bs);
@@ -154,13 +154,13 @@
   cityGlow.append("feGaussianBlur").attr("stdDeviation", 3.5);
   const cityColor = (d) => d.home === "lives" ? COLORS.home : d.home === "lived" ? COLORS.lived : d.wish ? COLORS.wish : "#ffd27a";
   const whoColor = (d) => d.together || (d.serhan && d.goknur) ? COLORS.together : d.serhan ? COLORS.serhan : d.goknur ? COLORS.goknur : cityColor(d);
-  function cityPhoto(c) {
+  function cityTrips(c) {
     const n = c.name.toLocaleLowerCase("tr");
-    const trips = state.trips.filter((t) => t.country_code === c.country_code &&
+    return state.trips.filter((t) => t.country_code === c.country_code &&
       ((t.city && t.city.toLocaleLowerCase("tr") === n) || (t.title || "").toLocaleLowerCase("tr").includes(n) || (t.note || "").toLocaleLowerCase("tr").includes(n)));
-    for (const t of trips) { const p = state.photos.find((x) => x.trip_id === t.id && !isVideo(x.path)); if (p) return p; }
-    return null;
   }
+  const cityMedia = (c) => cityTrips(c).flatMap((t) => state.photos.filter((p) => p.trip_id === t.id));
+  const cityPhoto = (c) => cityMedia(c).find((p) => !isVideo(p.path)) || null;
   function renderCities() {
     const nightMode = state.mode === "cities";
     const cities = state.cities.map((c) => ({ ...c, photo: nightMode ? cityPhoto(c) : null, mini: !nightMode, kind: nightMode ? badgeKind(c) : null }));
@@ -200,7 +200,7 @@
         });
         return e;
       })
-      .on("click", (ev, d) => openCountry(d.country_code));
+      .on("click", (ev, d) => { ev.stopPropagation(); openCity(d.id); });
     g.sort(cityDraw);
   }
   // öncelik: fotoğraflı > ev > birlikte > diğerleri
@@ -213,19 +213,64 @@
     gGrat.attr("d", path(graticule));
     gGlow.attr("r", projection.scale() * 1.13);
     $(".hero").style.opacity = zoomK > 1.6 ? 0 : 1;
-    gCountries.selectAll("path").attr("d", path);
+    const hi = zoomK >= 2.5 && hiRes;
+    if (zoomK >= 2.5 && !hiRes) loadHiRes();
+    gCountries.selectAll("path").attr("d", (f) => {
+      const h = hi && hiRes.get(f.properties.a2);
+      return path(h ? (f.properties.overseas ? h[1] || f : h[0]) : f);
+    });
     gArcs.selectAll("path").attr("d", (d) => path(arcLine(d.to)));
     const center = projection.invert([W / 2, H * 0.47]);
     gCities.classed("labels", zoomK >= (state.mode === "cities" ? 2.2 : 3.2)).classed("hide", state.mode !== "cities" && zoomK < 2.4).classed("wishNames", zoomK >= 3.6).selectAll("g.city:not(.pbadge)").each(function (d) {
       const vis = d3.geoDistance([d.lon, d.lat], center) < 1.5;
       const [x, y] = projection([d.lon, d.lat]);
-      this.setAttribute("transform", `translate(${x},${y})`);
+      this.setAttribute("transform", `translate(${x},${y})`); d._x = x; d._y = y;
       this.style.display = vis ? "" : "none";
     });
     layoutBadges(gBadges.selectAll("g.badge"), center, (d) => d.at, (a, b) => b.area - a.area, (a, b) => b.area - a.area);
     layoutBadges(gCities.selectAll("g.pbadge"), center, (d) => [d.lon, d.lat], cityPrio, cityDraw);
+    declutterLabels();
     const hv = d3.geoDistance(HOME, center) < 1.5, [hx, hy] = projection(HOME);
     gHome.attr("cx", hx).attr("cy", hy).attr("display", hv ? null : "none");
+  }
+
+  // Yakınlaşınca daha ayrıntılı kıyılar (50m harita, ihtiyaç olunca bir kez yüklenir)
+  let hiRes = null, hiLoading = false;
+  async function loadHiRes() {
+    if (hiLoading) return; hiLoading = true;
+    try {
+      const topo = await (await fetch("data/world.json?v=10")).json();
+      const m = new Map();
+      for (const f of topojson.feature(topo, topo.objects.countries).features) {
+        const a2 = f.properties.a2; if (!a2 || !state.byCode.has(a2)) continue;
+        m.set(a2, splitOverseas(f, true));
+      }
+      hiRes = m; redraw();
+    } catch (e) { console.warn("50m harita yüklenemedi", e); }
+  }
+
+  // Şehir adları üst üste binmesin: önemli olan önce yerleşir, çakışan ad gizlenir
+  function declutterLabels() {
+    const labelsOn = gCities.classed("labels"), wishOn = gCities.classed("wishNames");
+    if (gCities.classed("hide")) return;
+    const boxes = [], items = [];
+    gCities.selectAll("g.city").each(function (d) {
+      if (this.style.display === "none" || d._x == null) return;
+      if (d._bs) boxes.push([d._x - d._bs / 2, d._y - d._bs / 2, d._x + d._bs / 2, d._y + d._bs / 2]); // rozet de yer kaplar
+      const t = this.querySelector("text.cityName"); if (!t) return;
+      const show = !this.classList.contains("mini") && (t.classList.contains("always") || (labelsOn && (!this.classList.contains("wishc") || wishOn)));
+      if (!show) { t.style.visibility = ""; return; }
+      items.push({ t, d, rank: cityRank(d) + (d._bs ? 16 : 0) });
+    });
+    items.sort((a, b) => b.rank - a.rank);
+    for (const { t, d } of items) {
+      const w = d.name.length * 6.6 + 4, mid = t.getAttribute("text-anchor") === "middle";
+      const tx = d._x + (+t.getAttribute("x") || 0), ty = d._y + (+t.getAttribute("y") || 0);
+      const b = mid ? [tx - w / 2, ty - 11, tx + w / 2, ty + 3] : [tx, ty - 11, tx + w, ty + 3];
+      const hit = boxes.some((o) => b[0] < o[2] && b[2] > o[0] && b[1] < o[3] && b[3] > o[1]);
+      t.style.visibility = hit ? "hidden" : "";
+      if (!hit) boxes.push(b);
+    }
   }
 
   // Büyük daire yerine biraz yükselen yay: ara noktaları interpolasyonla üret
@@ -246,12 +291,13 @@
   }
   // Denizaşırı parçaları (ör. Fransız Guyanası, Svalbard, Hawaii) ana ülkeden ayır: boyanmaz, tıklanmaz.
   // Ana parçaya (ya da ona bağlı parçalara) 500 km'den yakın adalar ülkeye dahil kalır.
-  function splitOverseas(f) {
+  function splitOverseas(f, fast) {
     if (f.geometry.type !== "MultiPolygon") return [f, null];
     const parts = f.geometry.coordinates;
+    const rings = parts.map((c) => { const r = c[0], st = fast ? Math.ceil(r.length / 40) : 1; return st > 1 ? r.filter((_, i) => i % st === 0) : r; });
     const areas = parts.map((c) => d3.geoArea({ type: "Polygon", coordinates: c }));
     const main = areas.indexOf(Math.max(...areas)), kept = new Set([main]), th = 500 / 6371;
-    const near = (a, b) => { for (const p of parts[a][0]) for (const q of parts[b][0]) if (d3.geoDistance(p, q) < th) return true; return false; };
+    const near = (a, b) => { for (const p of rings[a]) for (const q of rings[b]) if (d3.geoDistance(p, q) < th) return true; return false; };
     let changed = true;
     while (changed) { changed = false; for (let i = 0; i < parts.length; i++) if (!kept.has(i)) for (const k of kept) if (near(i, k)) { kept.add(i); changed = true; break; } }
     if (f.properties.a2 === "US") parts.forEach((c, i) => { const [lon, lat] = d3.geoCentroid({ type: "Polygon", coordinates: c }); if (lon < -130 && lat > 50) kept.add(i); }); // Alaska eyalet
@@ -272,7 +318,7 @@
   // Sürükle = döndür, iki parmak / tekerlek = yakınlaştır
   function setupInteraction() {
     let prev;
-    const zoom = d3.zoom().scaleExtent([0.8, 8])
+    const zoom = d3.zoom().scaleExtent([0.8, 30])
       .on("start", (ev) => { stopSpin(); prev = ev.transform; })
       .on("zoom", (ev) => {
         const t = ev.transform;
@@ -397,6 +443,40 @@
     showStory(code, 0, opts);
   }
 
+  // Şehir kartı: rozete basınca yalnızca o şehir açılır
+  function openCity(id) {
+    const c = state.cities.find((x) => x.id === id); if (!c || state.picking) return;
+    stopSpin();
+    story = { code: c.country_code, city: c, idx: 0, pages: [{ trip: null }], opts: {} };
+    $("#story").hidden = false; renderStoryPage();
+  }
+  function renderCityPage() {
+    const c = story.city, code = c.country_code, media = cityMedia(c), trips = cityTrips(c);
+    const bg = $("#stBg"), first = media[0];
+    bg.innerHTML = first
+      ? isVideo(first.path) ? `<video src="${mediaUrl(first)}" autoplay muted loop playsinline></video>` : `<img src="${mediaUrl(first)}" alt="">`
+      : `<div class="flagbg" style="background-image:url(${flagUrl(code)})"></div>`;
+    $("#stBars").innerHTML = "";
+    const k = badgeKind(c), col = k ? BADGE_COLOR[k] : c.home ? COLORS.home : COLORS.wish;
+    const t0 = trips.find((t) => t.start_date), d = t0 ? new Date(t0.start_date + "T00:00:00") : null;
+    const dateTxt = d ? `${String(d.getDate()).padStart(2, "0")} · ${String(d.getMonth() + 1).padStart(2, "0")} · ${d.getFullYear()}` : c.home === "lives" ? "EVİMİZ" : c.home === "lived" ? "YAŞADIK" : k ? "GİDİLDİ" : c.wish ? "BİR GÜN" : "";
+    const whoTxt = { sero: "SERO", gorki: "GORKI", "ikimiz-ayri": "SERO · GORKI", birlikte: "SERO & GORKI" }[k] || "";
+    const st = $("#stStamp");
+    st.style.setProperty("--c", String(col).startsWith("url") ? COLORS.together : col);
+    st.innerHTML = `<div>${k ? `<img class="av" src="avatars/${k}.svg?v=10" alt="">` : `<img src="${flagUrl(code)}" alt="">`}<div class="n">${esc(c.name.toLocaleUpperCase("tr"))}</div><div class="d">${dateTxt}</div><div class="w">${whoTxt}</div></div>`;
+    st.style.animation = "none"; void st.offsetWidth; st.style.animation = "";
+    const km = Math.round(d3.geoDistance(HOME, [c.lon, c.lat]) * 6371);
+    $("#stRoute").textContent = c.home === "lives" ? `🏠 Evimiz · ${nameOf(code)}` : `✈ İstanbul → ${c.name} · ${km.toLocaleString("tr-TR")} km · ${nameOf(code)}`;
+    $("#stTitle").textContent = c.name;
+    const line = [k === "birlikte" && "Birlikte gittik", k === "ikimiz-ayri" && "İkimiz de ayrı ayrı gittik", k === "sero" && "Sero gitti", k === "gorki" && "Gorki gitti",
+      c.home === "lives" && "Burada yaşıyoruz", c.home === "lived" && "Bir dönem burada yaşadık", c.wish && "Gitmek istiyoruz"].filter(Boolean).join(" · ");
+    const notes = trips.map((t) => [t.title, t.note].filter(Boolean).join(": ")).filter(Boolean);
+    $("#stNote").textContent = [line, ...notes].join("\n") + (state.session && !media.length ? "\nFotoğraf için ülkenin gezilerine, başlığında şehrin adı geçen bir gezi ekle." : "");
+    $("#stThumbs").innerHTML = media.map((p, i) => `<div class="th" data-i="${i}">${isVideo(p.path) ? `<video src="${mediaUrl(p)}#t=0.5" muted playsinline preload="metadata"></video><span class="v">▶</span>` : `<img src="${mediaUrl(p)}" loading="lazy" alt="">`}</div>`).join("");
+    $("#stEdit").hidden = !state.session; $("#stPlayStop").hidden = true;
+    if (media.length > 1 && !isVideo(media[0].path)) cycleBg(media.filter((m) => !isVideo(m.path)));
+  }
+
   function storyPages(code) {
     const trips = state.trips.filter((t) => t.country_code === code);
     return trips.length ? trips.map((t) => ({ trip: t })) : [{ trip: null }];
@@ -410,7 +490,8 @@
   }
 
   function renderStoryPage() {
-    clearTimeout(storyTimer);
+    clearTimeout(storyTimer); clearInterval(bgCycle);
+    if (story.city) return renderCityPage();
     const { code, idx, pages } = story;
     const c = state.countries.get(code) || {};
     const trip = pages[idx].trip;
@@ -458,19 +539,20 @@
     }, Math.max(1800, STORY_MS / imgs.length));
   }
   function nextPage() {
-    if (!story) return;
+    if (!story || story.city) return;
     if (story.idx < story.pages.length - 1) { story.idx++; renderStoryPage(); return; }
     if (state.playing) { playNext(); return; }
     clearTimeout(storyTimer); // son sayfada bekle
     $("#stBars").querySelectorAll("div").forEach((d) => (d.className = "done"));
   }
-  function prevPage() { if (story && story.idx > 0) { story.idx--; renderStoryPage(); } }
+  function prevPage() { if (story && !story.city && story.idx > 0) { story.idx--; renderStoryPage(); } }
   function closeStory() {
     clearTimeout(storyTimer); clearInterval(bgCycle);
+    const wasCity = !!story?.city;
     $("#story").hidden = true; $("#stBg").innerHTML = ""; story = null;
     if (state.playing) stopPlay();
     state.selected = null; paintCountries(); lastInteract = Date.now();
-    if (!state.playing) flyHome(900);
+    if (!state.playing && !wasCity) flyHome(900); // şehir kartı kapanınca harita yerinde kalır
   }
 
   // ---------- Oynat: tüm geziler sırayla ----------
@@ -509,7 +591,7 @@
     clearTimeout(storyTimer);
     $("#cName").textContent = nameOf(code, state.byCode.get(code)?.properties.en);
     const c = state.countries.get(code) || {};
-    $("#cEdit").querySelectorAll("[data-f]").forEach((el) => { const k = el.dataset.f; if (el.type === "checkbox") el.checked = !!c[k]; else el.value = c[k] || ""; });
+    sheetVal = pickOf(c); renderPick($("#cPick"), sheetVal); renderCityList(code);
     renderTrips(); $("#tripForm").hidden = true; $("#addTripBtn").hidden = false;
     $("#sheet").hidden = false; $("#sheet").scrollTop = 0;
   }
@@ -531,13 +613,187 @@
   }
   const fmtDate = (d) => d ? new Date(d + "T00:00:00").toLocaleDateString("tr-TR", { day: "numeric", month: "long", year: "numeric" }) : "";
 
+  let sheetVal = null;
   async function saveStatus() {
-    const code = story.code, row = { code, updated_at: new Date().toISOString() };
-    $("#cEdit").querySelectorAll("[data-f]").forEach((el) => { row[el.dataset.f] = el.type === "checkbox" ? el.checked : el.value || null; });
-    const { data, error } = await sb.from("countries").upsert(row).select().single();
+    const code = story.code;
+    const { data, error } = await sb.from("countries").upsert({ code, ...sheetVal, updated_at: new Date().toISOString() }).select().single();
     if (error) return toast(errMsg(error));
     state.countries.set(code, data); renderAll(); toast("Kaydedildi");
   }
+
+  // ---------- Kim gitti? seçici ----------
+  const WHO_OPTS = [["sero", "Sero"], ["gorki", "Gorki"], ["ikimiz-ayri", "İkimiz de (ayrı)"], ["birlikte", "Birlikte"]];
+  const WHO_FLAGS = { sero: { serhan: true, goknur: false, together: false }, gorki: { serhan: false, goknur: true, together: false },
+    "ikimiz-ayri": { serhan: true, goknur: true, together: false }, birlikte: { serhan: true, goknur: true, together: true } };
+  const NO_ONE = { serhan: false, goknur: false, together: false };
+  const pickOf = (r) => ({ serhan: !!r?.serhan, goknur: !!r?.goknur, together: !!r?.together, wish: !!r?.wish, home: r?.home || null });
+  function renderPick(box, v) {
+    const k = badgeKind(v);
+    box.querySelector(".who").innerHTML = WHO_OPTS.map(([id, n]) => `<button type="button" class="chip${k === id ? " on" : ""}" data-who="${id}"><img src="avatars/${id}.svg?v=10" alt="">${n}</button>`).join("");
+    box.querySelector(".stat").innerHTML = [["wish", "💜 İstek"], ["lives", "🏠 Yaşıyoruz"], ["lived", "🧡 Yaşadık"]]
+      .map(([id, n]) => `<button type="button" class="chip2${(id === "wish" ? v.wish : v.home === id) ? " on" : ""}" data-st="${id}">${n}</button>`).join("");
+  }
+  function pickClick(e, v) {
+    const b = e.target.closest("[data-who],[data-st]"); if (!b) return false;
+    if (b.dataset.who) Object.assign(v, badgeKind(v) === b.dataset.who ? NO_ONE : WHO_FLAGS[b.dataset.who]);
+    else if (b.dataset.st === "wish") v.wish = !v.wish;
+    else v.home = v.home === b.dataset.st ? null : b.dataset.st;
+    return true;
+  }
+  const anyMark = (v) => v.serhan || v.goknur || v.together || v.wish || v.home;
+
+  // Ülke panelindeki şehir listesi
+  function renderCityList(code) {
+    const list = state.cities.filter((c) => c.country_code === code).sort((a, b) => a.name.localeCompare(b.name, "tr"));
+    $("#cCities").innerHTML = list.length ? list.map((c) => {
+      const k = badgeKind(c);
+      const ic = k ? `<img src="avatars/${k}.svg?v=10" alt="">` : `<i class="wi">${c.home ? "🏠" : "💜"}</i>`;
+      return `<div class="crow">${ic}<span>${esc(c.name)}</span><button class="small" data-editcity="${c.id}" aria-label="Düzenle">✎</button><button class="small" data-delcity="${c.id}" aria-label="Sil">🗑</button></div>`;
+    }).join("") : `<p class="muted">Henüz şehir yok.</p>`;
+  }
+  async function deleteCity(id) {
+    const c = state.cities.find((x) => x.id === id); if (!c || !confirm(`${c.name} silinsin mi?`)) return;
+    const { error } = await sb.from("cities").delete().eq("id", id);
+    if (error) return toast(errMsg(error));
+    state.cities = state.cities.filter((x) => x.id !== id);
+    renderAll(); if (story) renderCityList(story.code); toast(`${c.name} silindi`);
+  }
+
+  // ---------- Ekle paneli (ülke / şehir) ----------
+  const add = { tab: "country", code: null, city: null, editId: null, v: pickOf(null), restrict: null };
+  function findCountry(q) {
+    q = q.trim().toLocaleLowerCase("tr"); if (!q) return null;
+    const nm = (f) => nameOf(f.properties.a2, f.properties.en).toLocaleLowerCase("tr");
+    return (state.features.find((f) => nm(f) === q) || state.features.find((f) => nm(f).startsWith(q)))?.properties.a2 || null;
+  }
+  function openAdd(opts = {}) {
+    Object.assign(add, { tab: opts.tab || "country", code: null, city: null, editId: null, v: pickOf(null), restrict: opts.restrict || null });
+    $("#aQuery").value = "";
+    if (opts.cityId) {
+      const c = state.cities.find((x) => x.id === opts.cityId);
+      Object.assign(add, { tab: "city", editId: c.id, city: { name: c.name, lat: c.lat, lon: c.lon, country_code: c.country_code }, v: pickOf(c) });
+      $("#aQuery").value = c.name;
+    }
+    setAddTab(add.tab, true);
+    $("#sheet").hidden = true; $("#addSheet").hidden = false; $("#addSheet").scrollTop = 0;
+    if (!opts.cityId) setTimeout(() => $("#aQuery").focus(), 350);
+  }
+  function setAddTab(tab, keep) {
+    add.tab = tab;
+    $("#aTabs").querySelectorAll("button").forEach((b) => b.classList.toggle("on", b.dataset.tab === tab));
+    const q = $("#aQuery");
+    q.placeholder = tab === "country" ? "Ülke adı (ör. Portekiz)" : add.restrict ? `${nameOf(add.restrict)} içinde şehir ara` : "Şehir adı (ör. Lizbon)";
+    if (tab === "country") q.setAttribute("list", "countrylist"); else q.removeAttribute("list");
+    $("#aTitle").textContent = add.editId ? "Şehri düzenle" : "Ekle";
+    if (!keep) { q.value = ""; add.city = null; add.code = null; add.editId = null; add.v = pickOf(null); }
+    $("#aSug").hidden = true; showPicked(); renderPick($("#aPick"), add.v);
+  }
+  function showPicked() {
+    const p = $("#aPicked");
+    if (add.tab === "city" && add.city) {
+      p.hidden = false;
+      p.textContent = `📍 ${add.city.name || "İsim yaz"} · ${add.city.country_code ? nameOf(add.city.country_code) : "?"}` + (add.editId ? "" : add.existing ? " (zaten kayıtlı, güncellenecek)" : "");
+    } else if (add.tab === "country" && add.code) {
+      p.hidden = false; p.textContent = `🏳️ ${nameOf(add.code)}` + (state.countries.get(add.code) ? " (kayıtlı, güncellenecek)" : "");
+    } else p.hidden = true;
+  }
+  // ülke yazılınca mevcut durumu getir
+  function onCountryInput() {
+    const code = findCountry($("#aQuery").value);
+    if (code === add.code) return;
+    add.code = code; add.v = pickOf(state.countries.get(code)); renderPick($("#aPick"), add.v); showPicked();
+  }
+  // şehir önerileri: OpenStreetMap (Nominatim)
+  let sugT, sugSeq = 0;
+  function onCityInput() {
+    clearTimeout(sugT);
+    const q = $("#aQuery").value.trim();
+    if (add.city && add.city.manual) { add.city.name = q; showPicked(); }
+    if (q.length < 2) { $("#aSug").hidden = true; return; }
+    sugT = setTimeout(() => searchCity(q), 450);
+  }
+  async function searchCity(q) {
+    const my = ++sugSeq, box = $("#aSug");
+    const mapBtn = `<button type="button" data-mappick="1">🗺️ Bulamadın mı? Haritada dokunarak seç</button>`;
+    box.hidden = false; box.innerHTML = `<p class="muted">Aranıyor…</p>`;
+    let rows = [];
+    try {
+      const u = new URL("https://nominatim.openstreetmap.org/search");
+      u.search = new URLSearchParams({ q, format: "jsonv2", addressdetails: 1, limit: 6, "accept-language": "tr", ...(add.restrict ? { countrycodes: add.restrict.toLowerCase() } : {}) });
+      const r = await fetch(u); rows = await r.json();
+    } catch { rows = []; }
+    if (my !== sugSeq) return;
+    add.results = rows.filter((r) => r.address?.country_code).map((r) => ({
+      name: r.name || r.display_name.split(",")[0], lat: +r.lat, lon: +r.lon,
+      country_code: r.address.country_code.toUpperCase(),
+      sub: r.address.state || r.address.province || r.address.county || "",
+    }));
+    box.innerHTML = add.results.map((r, i) => `<button type="button" data-res="${i}">📍 ${esc(r.name)}<span class="muted"> · ${esc([r.sub, nameOf(r.country_code)].filter(Boolean).join(", "))}</span></button>`).join("")
+      + (add.results.length ? "" : `<p class="muted">Sonuç yok.</p>`) + mapBtn;
+  }
+  function chooseCity(r) {
+    const ex = state.cities.find((c) => c.country_code === r.country_code && c.name.toLocaleLowerCase("tr") === r.name.toLocaleLowerCase("tr") && c.id !== add.editId);
+    add.city = { ...r }; add.existing = !!ex && !add.editId;
+    if (ex && !add.editId) { add.editId = ex.id; add.v = pickOf(ex); }
+    $("#aQuery").value = r.name; $("#aSug").hidden = true; showPicked(); renderPick($("#aPick"), add.v);
+  }
+  function startMapPick() {
+    state.picking = true; $("#addSheet").hidden = true;
+    clearTimeout(storyTimer); $("#story").hidden = true;
+    if (add.restrict) flyTo(add.restrict, 900);
+    toast("Şehrin yerine haritada dokun", 6000);
+  }
+  function mapPick(ev) {
+    if (!state.picking) return;
+    ev.stopPropagation(); ev.preventDefault();
+    const [x, y] = d3.pointer(ev, svg.node()), ll = projection.invert([x, y]), r = projection.rotate();
+    if (!ll || d3.geoDistance(ll, [-r[0], -r[1]]) > Math.PI / 2 - 0.01) return toast("Dünyanın üstüne dokun");
+
+    const f = state.features.find((ft) => d3.geoContains(ft, ll));
+    if (!f) return toast("Bir ülkenin içine dokun");
+    state.picking = false;
+    add.city = { name: $("#aQuery").value.trim(), lat: ll[1], lon: ll[0], country_code: f.properties.a2, manual: true };
+    $("#aSug").hidden = true; $("#addSheet").hidden = false; showPicked();
+    if (!add.city.name) { toast("Şimdi şehrin adını yaz"); $("#aQuery").focus(); }
+  }
+  async function saveAdd() {
+    const v = add.v;
+    if (!anyMark(v)) return toast("Kim gittiğini ya da İstek / Ev seç");
+    const btn = $("#aSave"); btn.disabled = true;
+    try {
+      if (add.tab === "country") {
+        const code = add.code || findCountry($("#aQuery").value);
+        if (!code) return toast("Listeden bir ülke seç");
+        const { data, error } = await sb.from("countries").upsert({ code, ...v, updated_at: new Date().toISOString() }).select().single();
+        if (error) return toast(errMsg(error));
+        state.countries.set(code, data); renderAll(); toast(`${nameOf(code)} kaydedildi`);
+      } else {
+        const name = $("#aQuery").value.trim();
+        if (!add.city) return toast("Listeden bir şehir seç ya da haritada dokun");
+        if (!name) return toast("Şehrin adını yaz");
+        const cc = add.city.country_code;
+        const row = { name, country_code: cc, lat: add.city.lat, lon: add.city.lon, ...v };
+        const q = add.editId ? sb.from("cities").update(row).eq("id", add.editId) : sb.from("cities").insert(row);
+        const { data, error } = await q.select().single();
+        if (error) return toast(errMsg(error));
+        state.cities = state.cities.filter((c) => c.id !== data.id).concat(data);
+        await markCountryFromCity(cc, v);
+        renderAll(); toast(`${name} kaydedildi`);
+      }
+      $("#addSheet").hidden = true;
+      if (add.backToSheet && story) openSheet();
+    } finally { btn.disabled = false; }
+  }
+  // Şehir eklenince ülke de aynı kişiyle işaretlenir (varsa korunur)
+  async function markCountryFromCity(cc, v) {
+    const c = state.countries.get(cc) || { code: cc };
+    const m = { serhan: !!c.serhan || v.serhan, goknur: !!c.goknur || v.goknur, together: !!c.together || v.together, wish: !!c.wish, home: c.home || null };
+    if (!visited(m) && v.wish) m.wish = true;
+    if (m.serhan === !!c.serhan && m.goknur === !!c.goknur && m.together === !!c.together && m.wish === !!c.wish) return;
+    const { data, error } = await sb.from("countries").upsert({ code: cc, ...m, updated_at: new Date().toISOString() }).select().single();
+    if (!error) state.countries.set(cc, data);
+  }
+
   async function addTrip(ev) {
     ev.preventDefault();
     const fd = Object.fromEntries(new FormData(ev.target));
@@ -597,13 +853,14 @@
     const { data } = await sb.auth.getSession();
     state.session = data.session;
     $("#loginBtn").classList.toggle("on", !!state.session);
+    $("#addBtn").hidden = !state.session;
   }
   async function login() {
     const fd = Object.fromEntries(new FormData($("#loginForm")));
     const { error } = await sb.auth.signInWithPassword({ email: fd.email, password: fd.password });
     if (error) { $("#loginMsg").textContent = errMsg(error); return; }
     $("#loginDlg").close(); await refreshSession();
-    toast("Giriş yapıldı. Bir ülkeye dokunup Düzenle'ye basın.");
+    toast("Giriş yapıldı. Sağdaki + ile ülke ve şehir ekleyebilirsin.", 4000);
   }
 
   // ---------- Yardımcılar ----------
@@ -634,11 +891,23 @@
   on("#stClose", "click", closeStory);
   on("#stNext", "click", nextPage);
   on("#stPrev", "click", prevPage);
-  on("#stEdit", "click", openSheet);
-  on("#stThumbs", "click", (e) => { const th = e.target.closest(".th"); if (!th || !story) return; const trip = story.pages[story.idx].trip; const md = state.photos.filter((p) => p.trip_id === trip?.id); if (md[th.dataset.i]) showLightbox(md[th.dataset.i]); });
+  on("#stEdit", "click", () => { if (story?.city) { add.backToSheet = false; const id = story.city.id; clearTimeout(storyTimer); $("#story").hidden = true; openAdd({ cityId: id }); } else openSheet(); });
+  on("#stThumbs", "click", (e) => { const th = e.target.closest(".th"); if (!th || !story) return; const trip = story.pages[story.idx].trip; const md = story.city ? cityMedia(story.city) : state.photos.filter((p) => p.trip_id === trip?.id); if (md[th.dataset.i]) showLightbox(md[th.dataset.i]); });
   on("#flagstrip", "click", (e) => { const b = e.target.closest("button[data-code]"); if (b) openCountry(b.dataset.code); });
   on("#sheetClose", "click", closeSheet);
-  on("#cEdit", "change", saveStatus);
+  on("#cPick", "click", (e) => { if (pickClick(e, sheetVal)) { renderPick($("#cPick"), sheetVal); saveStatus(); } });
+  on("#cCities", "click", (e) => { const b = e.target.closest("button"); if (!b) return;
+    if (b.dataset.editcity) { add.backToSheet = true; openAdd({ cityId: Number(b.dataset.editcity) }); }
+    if (b.dataset.delcity) deleteCity(Number(b.dataset.delcity)); });
+  on("#addCityHere", "click", () => { add.backToSheet = true; openAdd({ tab: "city", restrict: story.code }); });
+  on("#addBtn", "click", () => { add.backToSheet = false; openAdd(); });
+  on("#addClose", "click", () => { $("#addSheet").hidden = true; if (add.backToSheet && story) openSheet(); });
+  on("#aTabs", "click", (e) => { const b = e.target.closest("button[data-tab]"); if (b && b.dataset.tab !== add.tab) { add.restrict = null; setAddTab(b.dataset.tab); } });
+  on("#aPick", "click", (e) => { if (pickClick(e, add.v)) renderPick($("#aPick"), add.v); });
+  on("#aQuery", "input", () => (add.tab === "country" ? onCountryInput() : onCityInput()));
+  on("#aSug", "click", (e) => { const b = e.target.closest("button"); if (!b) return; if (b.dataset.mappick) startMapPick(); else chooseCity(add.results[Number(b.dataset.res)]); });
+  on("#aSave", "click", saveAdd);
+  svg.node().addEventListener("click", mapPick, true);
   on("#addTripBtn", "click", () => { $("#tripForm").hidden = false; $("#addTripBtn").hidden = true; });
   on("#tripCancel", "click", () => { $("#tripForm").hidden = true; $("#addTripBtn").hidden = false; });
   on("#tripForm", "submit", addTrip);
