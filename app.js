@@ -85,7 +85,8 @@
 
   function paintCountries() {
     state.countries.forEach((c, code) => { if (visited(c)) ensureFlagPattern(code); });
-    gCountries.selectAll("path")
+    gCountries.selectAll("path.overseas").attr("fill", COLORS.land).attr("stroke", "rgba(255,255,255,.12)").attr("stroke-width", 0.5);
+    gCountries.selectAll("path.country")
       .attr("fill", (f) => fillFor(f.properties.a2))
       .attr("stroke", (f) => strokeFor(state.countries.get(f.properties.a2)))
       .attr("stroke-width", (f) => { const c = state.countries.get(f.properties.a2); return visited(c) || c?.wish ? 1.8 : 0.5; })
@@ -136,6 +137,25 @@
     }
     return best;
   }
+  // Denizaşırı parçaları (ör. Fransız Guyanası, Svalbard, Hawaii) ana ülkeden ayır: boyanmaz, tıklanmaz.
+  // Ana parçaya (ya da ona bağlı parçalara) 500 km'den yakın adalar ülkeye dahil kalır.
+  function splitOverseas(f) {
+    if (f.geometry.type !== "MultiPolygon") return [f, null];
+    const parts = f.geometry.coordinates;
+    const areas = parts.map((c) => d3.geoArea({ type: "Polygon", coordinates: c }));
+    const main = areas.indexOf(Math.max(...areas)), kept = new Set([main]), th = 500 / 6371;
+    const near = (a, b) => { for (const p of parts[a][0]) for (const q of parts[b][0]) if (d3.geoDistance(p, q) < th) return true; return false; };
+    let changed = true;
+    while (changed) { changed = false; for (let i = 0; i < parts.length; i++) if (!kept.has(i)) for (const k of kept) if (near(i, k)) { kept.add(i); changed = true; break; } }
+    if (f.properties.a2 === "US") parts.forEach((c, i) => { const [lon, lat] = d3.geoCentroid({ type: "Polygon", coordinates: c }); if (lon < -130 && lat > 50) kept.add(i); }); // Alaska eyalet
+    if (kept.size === parts.length) return [f, null];
+    const keep = parts.filter((_, i) => kept.has(i)), rest = parts.filter((_, i) => !kept.has(i));
+    return [
+      { type: "Feature", properties: f.properties, geometry: { type: "MultiPolygon", coordinates: keep } },
+      { type: "Feature", properties: { a2: f.properties.a2, overseas: true }, geometry: { type: "MultiPolygon", coordinates: rest } },
+    ];
+  }
+
   const centroidCache = new Map();
   function centroidOf(code) {
     if (!centroidCache.has(code)) { const f = state.byCode.get(code); centroidCache.set(code, f ? d3.geoCentroid(mainland(f)) : HOME); }
@@ -199,10 +219,13 @@
 
   async function initGlobe() {
     const topo = await (await fetch("data/world110.json")).json();
-    state.features = topojson.feature(topo, topo.objects.countries).features.filter((f) => f.properties.a2 && f.properties.a2 !== "AQ");
+    const all = topojson.feature(topo, topo.objects.countries).features.filter((f) => f.properties.a2 && f.properties.a2 !== "AQ");
+    const overseas = [];
+    state.features = all.map((f) => { const [m, o] = splitOverseas(f); if (o) overseas.push(o); return m; });
     state.features.forEach((f) => state.byCode.set(f.properties.a2, f));
-    gCountries.selectAll("path").data(state.features).join("path").attr("class", "country")
-      .on("click", (ev, f) => openCountry(f.properties.a2));
+    gCountries.selectAll("path").data([...overseas, ...state.features]).join("path")
+      .attr("class", (f) => f.properties.overseas ? "overseas" : "country")
+      .on("click", (ev, f) => { if (!f.properties.overseas) openCountry(f.properties.a2); });
     projection.rotate([-25, -38, 0]);
     layout(); setupInteraction();
     $("#countrylist").innerHTML = state.features.map((f) => nameOf(f.properties.a2, f.properties.en))
