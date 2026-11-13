@@ -849,18 +849,10 @@
   }
 
   // ---------- Giriş ----------
+  // Giriş kaldırıldı: düzenleme herkese açık.
   async function refreshSession() {
-    const { data } = await sb.auth.getSession();
-    state.session = data.session;
-    $("#loginBtn").classList.toggle("on", !!state.session);
-    $("#addBtn").hidden = !state.session;
-  }
-  async function login() {
-    const fd = Object.fromEntries(new FormData($("#loginForm")));
-    const { error } = await sb.auth.signInWithPassword({ email: fd.email, password: fd.password });
-    if (error) { $("#loginMsg").textContent = errMsg(error); return; }
-    $("#loginDlg").close(); await refreshSession();
-    toast("Giriş yapıldı. Sağdaki + ile ülke ve şehir ekleyebilirsin.", 4000);
+    state.session = true;
+    $("#addBtn").hidden = false;
   }
 
   // ---------- Yardımcılar ----------
@@ -914,12 +906,6 @@
   on("#cTrips", "change", (e) => { const id = e.target.dataset.upload; if (id && e.target.files.length) uploadMedia(Number(id), [...e.target.files]); });
   on("#cTrips", "click", (e) => { const t = e.target; if (t.dataset.photo) deletePhoto(Number(t.dataset.photo)); if (t.dataset.deltrip) deleteTrip(Number(t.dataset.deltrip)); });
   on("#lightbox", "click", () => { $("#lightbox").hidden = true; $("#lbMedia").innerHTML = ""; if (story) storyTimer = setTimeout(nextPage, 2500); });
-  on("#loginBtn", "click", async () => {
-    if (state.session) { if (confirm("Çıkış yapılsın mı?")) { await sb.auth.signOut(); await refreshSession(); } return; }
-    $("#loginMsg").textContent = ""; $("#loginDlg").showModal();
-  });
-  on("#loginForm", "submit", (e) => { e.preventDefault(); login(); });
-  on("#loginCancel", "click", () => $("#loginDlg").close());
   on("#search", "change", (e) => {
     const q = e.target.value.trim().toLocaleLowerCase("tr"); if (!q) return;
     const f = state.features.find((x) => nameOf(x.properties.a2, x.properties.en).toLocaleLowerCase("tr") === q)
@@ -943,6 +929,5 @@
     } catch (e) {
       console.error(e); $("#loading").textContent = "Yüklenemedi: " + errMsg(e);
     }
-    sb.auth.onAuthStateChange(() => refreshSession());
   })();
 })();
