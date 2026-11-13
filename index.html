@@ -1,0 +1,105 @@
+<!doctype html>
+<html lang="tr">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1">
+<meta name="theme-color" content="#14213d">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Gezi Haritası">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon.svg" type="image/svg+xml">
+<link rel="apple-touch-icon" href="icon-192.png">
+<title>Gezi Haritası</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header class="topbar">
+  <div class="search">
+    <input id="search" type="search" placeholder="Ülke ara" autocomplete="off" list="countrylist">
+    <datalist id="countrylist"></datalist>
+  </div>
+  <button id="shareBtn" class="iconbtn" aria-label="Paylaş" title="Paylaş">
+    <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4" stroke-width="2" fill="none"/></svg>
+  </button>
+  <button id="loginBtn" class="iconbtn" aria-label="Giriş" title="Düzenlemek için giriş">
+    <svg viewBox="0 0 24 24" width="22" height="22"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>
+  </button>
+</header>
+
+<section class="stats" id="stats">
+  <div><b id="statCountries">0</b><span>ülke</span></div>
+  <div><b id="statPercent">%0</b><span>dünyanın</span></div>
+  <div><b id="statTogether">0</b><span>birlikte</span></div>
+  <div><b id="statCities">0</b><span>şehir</span></div>
+</section>
+
+<main id="mapWrap"><svg id="map"></svg><div id="loading">Harita yükleniyor…</div></main>
+
+<footer class="bottom">
+  <div class="toggle" role="tablist">
+    <button id="modeCountries" class="on">Ülkeler</button>
+    <button id="modeCities">Şehirler</button>
+  </div>
+  <div class="legend" id="legend"></div>
+</footer>
+
+<!-- Ülke kartı -->
+<div id="sheet" class="sheet" hidden>
+  <div class="sheet-handle"></div>
+  <div class="sheet-head">
+    <h2 id="cName"></h2>
+    <button class="iconbtn close" id="sheetClose" aria-label="Kapat">✕</button>
+  </div>
+  <div id="cBadges" class="badges"></div>
+  <div id="cEdit" class="edit-status" hidden>
+    <label><input type="checkbox" data-f="serhan"> Sero gitti</label>
+    <label><input type="checkbox" data-f="goknur"> Gorki gitti</label>
+    <label><input type="checkbox" data-f="together"> Birlikte gittik</label>
+    <label><input type="checkbox" data-f="wish"> Gitmek istiyoruz</label>
+    <label class="sel">Ev:
+      <select data-f="home"><option value="">—</option><option value="lives">Yaşıyoruz</option><option value="lived">Yaşadık</option></select>
+    </label>
+  </div>
+  <h3>Geziler</h3>
+  <div id="cTrips"></div>
+  <button id="addTripBtn" class="primary" hidden>+ Gezi ekle</button>
+  <form id="tripForm" class="tripform" hidden>
+    <input name="title" placeholder="Başlık (ör. Kopenhag hafta sonu)">
+    <div class="row">
+      <label>Başlangıç<input name="start_date" type="date"></label>
+      <label>Bitiş<input name="end_date" type="date"></label>
+    </div>
+    <select name="who"><option value="together">Birlikte</option><option value="serhan">Sero</option><option value="goknur">Gorki</option></select>
+    <textarea name="note" rows="3" placeholder="Not"></textarea>
+    <div class="row"><button type="submit" class="primary">Kaydet</button><button type="button" id="tripCancel">Vazgeç</button></div>
+  </form>
+  <h3 id="cCitiesTitle">Şehirler</h3>
+  <div id="cCities" class="chips"></div>
+</div>
+
+<!-- Giriş -->
+<dialog id="loginDlg">
+  <form method="dialog" id="loginForm">
+    <h2>Düzenleme girişi</h2>
+    <p class="muted">Haritayı herkes görebilir. Değiştirmek için ortak hesapla giriş yapın.</p>
+    <input name="email" type="email" placeholder="E-posta" required autocomplete="username">
+    <input name="password" type="password" placeholder="Şifre" required autocomplete="current-password" minlength="8">
+    <p id="loginMsg" class="muted"></p>
+    <div class="row">
+      <button type="submit" class="primary" value="login">Giriş</button>
+      <button type="button" id="signupBtn">Hesap oluştur</button>
+      <button type="button" id="loginCancel">Kapat</button>
+    </div>
+  </form>
+</dialog>
+
+<div id="lightbox" hidden><img alt=""><button class="iconbtn close" aria-label="Kapat">✕</button></div>
+<div id="toast" hidden></div>
+
+<script src="vendor/d3.min.js"></script>
+<script src="vendor/topojson-client.min.js"></script>
+<script src="vendor/supabase.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
