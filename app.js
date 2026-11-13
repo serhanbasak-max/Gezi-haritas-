@@ -303,6 +303,8 @@
     const m = e?.message || String(e);
     if (/row-level security|violates|permission|Unauthorized|403/i.test(m)) return "Bu hesabın düzenleme yetkisi yok.";
     if (/Invalid login/i.test(m)) return "E-posta ya da şifre hatalı.";
+    if (/Email not confirmed/i.test(m)) return "Hesap henüz onaylanmadı.";
+    if (/only request this after/i.test(m)) return "Çok hızlı denendi, yarım dakika sonra tekrar deneyin.";
     return m;
   }
   let toastT;
@@ -344,7 +346,6 @@
     $("#loginMsg").textContent = ""; $("#loginDlg").showModal();
   };
   $("#loginForm").addEventListener("submit", (e) => { e.preventDefault(); login(false); });
-  $("#signupBtn").onclick = () => login(true);
   $("#loginCancel").onclick = () => $("#loginDlg").close();
   $("#search").addEventListener("change", (e) => {
     const q = e.target.value.trim().toLocaleLowerCase("tr");
