@@ -6,7 +6,7 @@
   const on = (s, ev, fn) => { const el = $(s); if (el) el.addEventListener(ev, fn); };
 
   const COLORS = { serhan: "#3b82f6", goknur: "#f5b301", together: "#ff4d6d", wish: "#a78bfa", home: "#22c55e", lived: "#fb923c", land: "#21456b", sea: "#0e3b66" };
-  const LEGEND = [["Sero", COLORS.serhan], ["Gorki", COLORS.goknur], ["Birlikte", COLORS.together], ["İkimiz de", "linear-gradient(90deg,#3b82f6 50%,#f5b301 50%)"], ["İstek", COLORS.wish], ["Ev", COLORS.home], ["Yaşadık", COLORS.lived]];
+  const LEGEND = [["Sero", COLORS.serhan], ["Gorki", COLORS.goknur], ["Birlikte", COLORS.together], ["İstek", COLORS.wish]];
   const HOME = [28.9784, 41.0082]; // İstanbul
   const EXTRA_NAMES = { "CY-N": "Kuzey Kıbrıs", "SO-SL": "Somaliland", XK: "Kosova" };
   let trNames; try { trNames = new Intl.DisplayNames(["tr"], { type: "region" }); } catch { trNames = null; }
@@ -93,7 +93,8 @@
       .attr("stroke-width", (f) => { const c = state.countries.get(f.properties.a2); return visited(c) || c?.wish ? 1.8 : 0.5; })
       .attr("stroke-dasharray", (f) => { const c = state.countries.get(f.properties.a2); return c?.wish && !visited(c) ? "4 3" : null; })
       .classed("sel", (f) => f.properties.a2 === state.selected);
-    const arcs = state.mode === "countries"
+    // uçuş çizgileri kalabalık yapıyordu: kapalı (sade görünüm)
+    const arcs = false
       ? [...state.countries.values()].filter((c) => (c.serhan || c.goknur || c.together) && c.code !== "TR" && state.byCode.get(c.code)).map((c) => ({ code: c.code, to: centroidOf(c.code), color: c.together ? COLORS.together : c.serhan && c.goknur ? "#a3e635" : c.serhan ? COLORS.serhan : COLORS.goknur }))
       : [];
     gArcs.selectAll("path").data(arcs, (d) => d.code).join("path").attr("class", "arc").attr("stroke", (d) => d.color)
@@ -121,7 +122,7 @@
     }).order();
   }
   // Rozetleri yerleştir: öncelikli olan önce; çakışan rozet küçük renkli noktaya döner, yaklaştırınca açılır
-  const badgeSize = () => Math.min(18 + 11 * Math.log2(zoomK + 1), 66);
+  const badgeSize = () => Math.min(14 + 7 * Math.log2(zoomK + 1), 34); // küçük portreler
   function layoutBadges(sel, center, posOf, placeOrder, prio) {
     const bs = badgeSize(), gap = bs * 0.92, placed = [];
     let reorder = false;
@@ -221,7 +222,7 @@
     });
     gArcs.selectAll("path").attr("d", (d) => path(arcLine(d.to)));
     const center = projection.invert([W / 2, H * 0.47]);
-    gCities.classed("labels", zoomK >= (state.mode === "cities" ? 2.2 : 3.2)).classed("hide", state.mode !== "cities" && zoomK < 2.4).classed("wishNames", zoomK >= 3.6).selectAll("g.city:not(.pbadge)").each(function (d) {
+    gCities.classed("labels", zoomK >= (state.mode === "cities" ? 2.2 : 3.2)).classed("hide", state.mode !== "cities").classed("wishNames", zoomK >= 3.6).selectAll("g.city:not(.pbadge)").each(function (d) {
       const vis = d3.geoDistance([d.lon, d.lat], center) < 1.5;
       const [x, y] = projection([d.lon, d.lat]);
       this.setAttribute("transform", `translate(${x},${y})`); d._x = x; d._y = y;

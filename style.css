@@ -161,3 +161,13 @@ dialog::backdrop{background:rgba(0,0,0,.6)}
 .labels .wishc .cityName{display:none}
 .labels.wishNames .wishc .cityName{display:block}
 .stamp img.av{width:58px;height:58px;border-radius:50%;object-fit:contain}
+
+/* Sade görünüm (B): küçük portreler, çakışan portre gizli, bayrak şeridi yok, arama düğmesi */
+.badge.mini{display:none}
+.flagstrip{display:none}
+.topbar{justify-content:flex-end}
+.topbar input:not(:focus):placeholder-shown{flex:0 0 42px;width:42px;height:42px;padding:0;cursor:pointer;color:transparent;background:var(--glass) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='white' stroke-width='2.4'%3E%3Ccircle cx='10.5' cy='10.5' r='6.5'/%3E%3Cpath d='M15.5 15.5L21 21'/%3E%3C/svg%3E") center/20px no-repeat}
+.topbar input:not(:focus):placeholder-shown::placeholder{color:transparent}
+.topbar input::-webkit-search-cancel-button{display:none}
+.legend{font-size:13px;gap:4px 14px}
+.fab{width:46px;height:46px;font-size:26px;top:auto;bottom:calc(env(safe-area-inset-bottom) + 110px)}
